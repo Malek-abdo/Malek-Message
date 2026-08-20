@@ -1,0 +1,7 @@
+{
+  "name": "Malek Message",
+  "description": "منصة محادثات اجتماعية ومجتمعات عربية متصلة بقاعدة بيانات Firebase",
+  "requestFramePermissions": ["camera", "microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+

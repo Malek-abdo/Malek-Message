@@ -1,0 +1,153 @@
+@import "tailwindcss";
+
+:root {
+  --violet: #6d5dfc;
+  --night: #111827;
+  --cream: #f8f7f3;
+  --lavender: #e9e5ff;
+  --coral: #ff8066;
+  --mint: #b8f3df;
+  --haze: #f0efff;
+}
+
+* {
+  box-sizing: border-box;
+  scrollbar-width: thin;
+  scrollbar-color: #d9d5ff transparent;
+}
+
+body {
+  margin: 0;
+  color: #18181b;
+  font-family: "Alexandria", system-ui, -apple-system, Tahoma, Arial, sans-serif;
+  background:
+    radial-gradient(
+      circle at 90% 5%,
+      rgba(109, 93, 252, 0.11),
+      transparent 28%
+    ),
+    radial-gradient(
+      circle at 8% 90%,
+      rgba(184, 243, 223, 0.22),
+      transparent 30%
+    ),
+    #f8f7f3;
+  min-height: 100vh;
+}
+
+button, input, textarea {
+  font-family: inherit;
+}
+
+.mesh {
+  background-color: #111827;
+  background-image:
+    radial-gradient(rgba(255, 255, 255, 0.08) 1px, transparent 1px),
+    linear-gradient(
+      135deg,
+      rgba(109, 93, 252, 0.38),
+      transparent 48%
+    );
+  background-size: 22px 22px, 100% 100%;
+}
+
+.glass {
+  background: rgba(255, 255, 255, 0.82);
+  border: 1px solid rgba(255, 255, 255, 0.85);
+  box-shadow:
+    0 20px 50px rgba(24, 24, 27, 0.06),
+    inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  backdrop-filter: blur(22px);
+  -webkit-backdrop-filter: blur(22px);
+}
+
+.interactive-card {
+  position: relative;
+  overflow: hidden;
+  transition: transform 0.25s ease, box-shadow 0.25s ease, border-color 0.25s ease;
+}
+
+.interactive-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 24px 50px rgba(36, 32, 90, 0.12);
+}
+
+.icon-button {
+  transition: transform 0.2s ease, color 0.2s ease, background-color 0.2s ease;
+}
+
+.icon-button:hover {
+  color: #6d5dfc;
+  background: #e9e5ff;
+  transform: translateY(-2px) scale(1.04);
+}
+
+.primary-button {
+  background: linear-gradient(135deg, #18181b, #302c52);
+  box-shadow: 0 14px 28px rgba(24, 24, 27, 0.18);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.primary-button:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 20px 35px rgba(24, 24, 27, 0.24);
+}
+
+.primary-button:active {
+  transform: scale(0.97);
+}
+
+.gradient-text {
+  color: transparent;
+  background: linear-gradient(120deg, #6d5dfc, #8b7fff, #ff8066);
+  background-clip: text;
+  -webkit-background-clip: text;
+}
+
+.nav-float {
+  box-shadow: 0 20px 48px rgba(24, 24, 27, 0.15), 0 2px 8px rgba(24, 24, 27, 0.08);
+}
+
+.nav-active {
+  color: #fff;
+  background: linear-gradient(135deg, #18181b, #302c52);
+  box-shadow: 0 10px 22px rgba(24, 24, 27, 0.22);
+}
+
+.message-area {
+  background:
+    radial-gradient(rgba(109, 93, 252, 0.055) 0.8px, transparent 0.8px),
+    linear-gradient(180deg, #fdfdfc, #faf9f6);
+  background-size: 18px 18px, 100% 100%;
+}
+
+.bubble-me {
+  max-width: min(78%, 520px);
+  color: #fff;
+  background: linear-gradient(135deg, #18181b, #302c52);
+  border-radius: 20px 20px 6px 20px;
+  box-shadow: 0 8px 20px rgba(24, 24, 27, 0.12);
+}
+
+.bubble-them {
+  max-width: min(78%, 520px);
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid rgba(24, 24, 27, 0.07);
+  border-radius: 20px 20px 20px 6px;
+  box-shadow: 0 7px 18px rgba(24, 24, 27, 0.05);
+}
+
+.shadow-violet {
+  box-shadow: 0 12px 30px rgba(109, 93, 252, 0.3);
+}
+
+.shadow-soft {
+  box-shadow: 0 12px 35px rgba(24, 24, 27, 0.07);
+}
+
+.hide-scroll::-webkit-scrollbar {
+  display: none;
+}
+.hide-scroll {
+  scrollbar-width: none;
+}

@@ -1,0 +1,123 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile in Malek Message",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "displayName": { "type": "string" },
+        "username": { "type": "string" },
+        "email": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "bio": { "type": "string" },
+        "isOnline": { "type": "boolean" },
+        "createdAt": { "type": "string" },
+        "lastSeen": { "type": "string" }
+      },
+      "required": ["uid", "username"]
+    },
+    "Conversation": {
+      "title": "Conversation",
+      "description": "1-on-1 or group chat thread",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "participants": { "type": "array" },
+        "participantData": { "type": "object" },
+        "lastMessage": { "type": "string" },
+        "lastMessageTime": { "type": "string" },
+        "lastSenderId": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["participants", "createdAt"]
+    },
+    "Message": {
+      "title": "Message",
+      "description": "Message inside a conversation",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "senderId": { "type": "string" },
+        "senderName": { "type": "string" },
+        "text": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "read": { "type": "boolean" }
+      },
+      "required": ["senderId", "text", "createdAt"]
+    },
+    "Community": {
+      "title": "Community",
+      "description": "Topic or interest circle",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "createdBy": { "type": "string" },
+        "membersCount": { "type": "number" },
+        "members": { "type": "array" },
+        "letters": { "type": "string" },
+        "tone": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["title", "createdBy", "createdAt"]
+    },
+    "Call": {
+      "title": "Call",
+      "description": "Call or group meeting record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "hostId": { "type": "string" },
+        "hostName": { "type": "string" },
+        "link": { "type": "string" },
+        "type": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "participants": { "type": "array" }
+      },
+      "required": ["hostId", "link", "createdAt"]
+    },
+    "Note": {
+      "title": "Note",
+      "description": "Quick public or personal note",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "authorId": { "type": "string" },
+        "authorName": { "type": "string" },
+        "authorUsername": { "type": "string" },
+        "content": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["authorId", "content", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "Profiles of registered users"
+    },
+    "/conversations/{conversationId}": {
+      "schema": "Conversation",
+      "description": "Conversation threads"
+    },
+    "/conversations/{conversationId}/messages/{messageId}": {
+      "schema": "Message",
+      "description": "Messages inside conversation"
+    },
+    "/communities/{communityId}": {
+      "schema": "Community",
+      "description": "Public circles and groups"
+    },
+    "/calls/{callId}": {
+      "schema": "Call",
+      "description": "Call records and links"
+    },
+    "/notes/{noteId}": {
+      "schema": "Note",
+      "description": "Quick notes"
+    }
+  }
+}
