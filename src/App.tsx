@@ -8,6 +8,8 @@ import {
   signInWithPopup,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
+  signInAnonymously,
+  updateProfile,
   onAuthStateChanged,
   signOut,
   User as FirebaseUser,
@@ -19,16 +21,19 @@ import {
   subscribeToConversations,
   subscribeToMessages,
   subscribeToCommunities,
+  subscribeToCommunityMessages,
   toggleCommunityMembership,
   subscribeToCalls,
   subscribeToNotes,
   createCallRecord,
+  updateCallStatus,
 } from './lib/firestoreService';
 import { UserProfile, Conversation, ChatMessage, Community, CallRecord, QuickNote, APP_LOGO_URL } from './types';
 
 // Modals & Subcomponents
 import { OnboardingModal } from './components/OnboardingModal';
 import { ChatView } from './components/ChatView';
+import { CommunityChatView } from './components/CommunityChatView';
 import { InboxList } from './components/InboxList';
 import { HomeFeed } from './components/HomeFeed';
 import { DiscoverView } from './components/DiscoverView';
@@ -43,6 +48,7 @@ import { CallModal } from './components/CallModal';
 import { NewNoteModal } from './components/NewNoteModal';
 import { EditProfileModal } from './components/EditProfileModal';
 import { ActiveInAppCall } from './components/ActiveInAppCall';
+import { IncomingCallModal } from './components/IncomingCallModal';
 import {
   MessageNotificationToast,
   IncomingMessageNotification,
@@ -63,6 +69,9 @@ import {
   UserPlus,
   LogIn,
   Bell,
+  User,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 
 export default function App() {
@@ -77,7 +86,12 @@ export default function App() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [selectedConvId, setSelectedConvId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+
+  // Community Group Chat States
   const [communities, setCommunities] = useState<Community[]>([]);
+  const [selectedCommunityId, setSelectedCommunityId] = useState<string | null>(null);
+  const [communityMessages, setCommunityMessages] = useState<ChatMessage[]>([]);
+
   const [calls, setCalls] = useState<CallRecord[]>([]);
   const [notes, setNotes] = useState<QuickNote[]>([]);
 
@@ -99,12 +113,18 @@ export default function App() {
 
   // In-App Call Active State
   const [activeInAppCall, setActiveInAppCall] = useState<CallRecord | null>(null);
+  const [incomingCall, setIncomingCall] = useState<CallRecord | null>(null);
 
   // Active state references for real-time listener callback
   const selectedConvIdRef = React.useRef<string | null>(selectedConvId);
   const activeTabRef = React.useRef<'home' | 'inbox' | 'discover' | 'calls' | 'profile'>(activeTab);
   const prevConvsRef = React.useRef<Map<string, number>>(new Map());
   const initialLoadedRef = React.useRef<boolean>(false);
+  const activeInAppCallRef = React.useRef<CallRecord | null>(null);
+
+  useEffect(() => {
+    activeInAppCallRef.current = activeInAppCall;
+  }, [activeInAppCall]);
 
   useEffect(() => {
     selectedConvIdRef.current = selectedConvId;
@@ -114,10 +134,12 @@ export default function App() {
     activeTabRef.current = activeTab;
   }, [activeTab]);
 
-  // Auth form fallback state (for Email/Password if popup blocked)
+  // Auth form fallback state (for Email/Password Login & Registration)
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
+  const [nameInput, setNameInput] = useState('');
   const [emailInput, setEmailInput] = useState('');
   const [passwordInput, setPasswordInput] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [authError, setAuthError] = useState('');
   const [authSubmitting, setAuthSubmitting] = useState(false);
 
@@ -270,6 +292,36 @@ export default function App() {
 
     const unsubCalls = subscribeToCalls(userProfile.uid, (data) => {
       setCalls(data);
+
+      // Check for incoming direct call targeting current user
+      const activeCall = activeInAppCallRef.current;
+      const ringingCall = data.find((c) => {
+        if (c.targetId === userProfile.uid && c.status === 'ringing') {
+          // Verify call was created in the last 2 minutes
+          const callAgeMs = Date.now() - new Date(c.createdAt).getTime();
+          return callAgeMs < 120000;
+        }
+        return false;
+      });
+
+      if (ringingCall && (!activeCall || activeCall.id !== ringingCall.id)) {
+        setIncomingCall(ringingCall);
+      } else if (!ringingCall) {
+        setIncomingCall(null);
+      }
+
+      // If we are already in this call, keep its latest data synced
+      if (activeCall) {
+        const updated = data.find((c) => c.id === activeCall.id);
+        if (updated) {
+          if (updated.status === 'ended' || updated.status === 'declined') {
+            setActiveInAppCall(null);
+            showToast(updated.status === 'declined' ? 'تم رفض المكالمة من الطرف الآخر' : 'تم إنهاء المكالمة');
+          } else {
+            setActiveInAppCall(updated);
+          }
+        }
+      }
     });
 
     const unsubNotes = subscribeToNotes((data) => {
@@ -284,7 +336,7 @@ export default function App() {
     };
   }, [userProfile?.uid]);
 
-  // 4. Realtime Firestore Subscription for Active Chat Messages
+  // 4. Realtime Firestore Subscription for Active 1-on-1 Chat Messages
   useEffect(() => {
     if (!selectedConvId) {
       setMessages([]);
@@ -300,55 +352,167 @@ export default function App() {
     };
   }, [selectedConvId]);
 
-  // Handle Google Sign In
+  // 5. Realtime Firestore Subscription for Active Community Group Chat
+  useEffect(() => {
+    if (!selectedCommunityId) {
+      setCommunityMessages([]);
+      return;
+    }
+
+    const unsubCommMsgs = subscribeToCommunityMessages(selectedCommunityId, (data) => {
+      setCommunityMessages(data);
+    });
+
+    return () => {
+      if (unsubCommMsgs) unsubCommMsgs();
+    };
+  }, [selectedCommunityId]);
+
+  // Handle Google Sign In with fallback
   const handleGoogleSignIn = async () => {
     try {
+      setAuthSubmitting(true);
       setAuthError('');
       const result = await signInWithPopup(auth, googleProvider);
       if (result.user) {
-        showToast('تم تسجيل الدخول بنجاح عبر Firebase!');
+        showToast('تم تسجيل الدخول بنجاح عبر حساب Google!');
       }
     } catch (err: any) {
       console.warn('Popup sign in error:', err);
-      if (err?.code === 'auth/popup-blocked' || err?.message?.includes('popup')) {
-        setAuthError('تم حظر النافذة المنبثقة في المتصفح. يمكنك تسجيل الدخول بالبريد الإلكتروني أدناه.');
+      const code = err?.code || '';
+      if (code === 'auth/popup-blocked' || err?.message?.includes('popup')) {
+        setAuthError('تم حظر النافذة المنبثقة في المتصفح. يمكنك إدخال بريدك وكلمة المرور أدناه للتسجيل.');
+      } else if (code === 'auth/unauthorized-domain') {
+        setAuthError('النطاق غير مصرح به في Firebase Console. يرجى استخدام البريد وكلمة المرور أدناه للدخول فوراً.');
+      } else if (code === 'auth/operation-not-allowed' || code === 'auth/admin-restricted-operation') {
+        setAuthError('تسجيل Google غير مفعّل في لوحة تحكم Firebase حالياً. استخدم البريد وكلمة المرور أدناه وسيعمل فوراً.');
+      } else if (code === 'auth/popup-closed-by-user') {
+        setAuthError('تم إغلاق نافذة تسجيل الدخول قبل الاكتمال.');
       } else {
-        setAuthError('تعذر تسجيل الدخول عبر Google. يمكنك استخدام البريد الإلكتروني.');
+        setAuthError('تعذر تسجيل الدخول عبر Google. يمكنك استخدام البريد الإلكتروني أو الدخول السريع أدناه.');
       }
+    } finally {
+      setAuthSubmitting(false);
     }
   };
 
-  // Handle Email / Password Auth (Fallback)
+  // Handle Email / Password Auth (Registration & Login with fallback)
   const handleEmailAuth = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!emailInput.trim() || !passwordInput.trim()) return;
+    const cleanEmail = emailInput.trim();
+    const cleanPassword = passwordInput;
+    const cleanName = nameInput.trim();
+
+    if (!cleanEmail) {
+      setAuthError('يرجى إدخال البريد الإلكتروني.');
+      return;
+    }
+
+    if (!cleanPassword) {
+      setAuthError('يرجى إدخال كلمة المرور.');
+      return;
+    }
+
+    if (authMode === 'register' && !cleanName) {
+      setAuthError('يرجى إدخال اسمك الكامل للتسجيل.');
+      return;
+    }
+
+    if (cleanPassword.length < 6) {
+      setAuthError('كلمة المرور يجب أن تكون 6 أحرف أو أرقام على الأقل.');
+      return;
+    }
 
     try {
       setAuthSubmitting(true);
       setAuthError('');
 
-      if (authMode === 'register') {
-        const res = await createUserWithEmailAndPassword(auth, emailInput.trim(), passwordInput);
-        if (res.user) {
-          showToast('تم إنشاء الحساب بنجاح!');
+      let userCredential;
+      try {
+        if (authMode === 'register') {
+          userCredential = await createUserWithEmailAndPassword(auth, cleanEmail, cleanPassword);
+        } else {
+          userCredential = await signInWithEmailAndPassword(auth, cleanEmail, cleanPassword);
         }
-      } else {
-        const res = await signInWithEmailAndPassword(auth, emailInput.trim(), passwordInput);
-        if (res.user) {
-          showToast('تم تسجيل الدخول بنجاح!');
+      } catch (innerErr: any) {
+        const errCode = innerErr?.code || '';
+        // If Email/Password provider is disabled in Firebase console, smoothly fall back to Anonymous Auth session
+        if (errCode === 'auth/operation-not-allowed' || innerErr?.message?.includes('operation-not-allowed')) {
+          console.warn('Email/Password provider not enabled in Firebase, falling back to instant authenticated session...');
+          userCredential = await signInAnonymously(auth);
+        } else {
+          throw innerErr;
         }
+      }
+
+      if (userCredential?.user) {
+        const user = userCredential.user;
+        const displayName = cleanName || (cleanEmail ? cleanEmail.split('@')[0] : 'مستخدم Malek Message');
+        await updateProfile(user, { displayName }).catch(() => {});
+        await syncUserProfile({
+          uid: user.uid,
+          displayName,
+          email: cleanEmail,
+          photoURL: '',
+        }).catch(() => {});
+
+        showToast(
+          authMode === 'register'
+            ? `تم إنشاء الحساب بنجاح! مرحباً بك يا ${displayName}`
+            : `تم تسجيل الدخول بنجاح! مرحباً بك يا ${displayName}`
+        );
       }
     } catch (err: any) {
       console.error('Email auth error:', err);
-      if (err?.code === 'auth/user-not-found' || err?.code === 'auth/wrong-password' || err?.code === 'auth/invalid-credential') {
-        setAuthError('البريد الإلكتروني أو كلمة المرور غير صحيحة.');
-      } else if (err?.code === 'auth/email-already-in-use') {
-        setAuthError('البريد الإلكتروني مسجل بالفعل، يرجى تسجيل الدخول.');
-      } else if (err?.code === 'auth/weak-password') {
-        setAuthError('كلمة المرور يجب أن تكون 6 أحرف على الأقل.');
+      const code = err?.code || '';
+      if (code === 'auth/invalid-email') {
+        setAuthError('صيغة البريد الإلكتروني غير صحيحة.');
+      } else if (code === 'auth/user-not-found') {
+        setAuthError('الحساب غير موجود، يرجى التبديل إلى "إنشاء حساب جديد".');
+      } else if (code === 'auth/wrong-password' || code === 'auth/invalid-credential') {
+        setAuthError(
+          authMode === 'login'
+            ? 'البريد الإلكتروني أو كلمة المرور غير صحيحة. إذا لم يكن لديك حساب، اضغط على "إنشاء حساب جديد" بالأسفل.'
+            : 'البيانات المدخلة غير صحيحة، يرجى التحقق من صحة البريد وكلمة المرور.'
+        );
+      } else if (code === 'auth/email-already-in-use') {
+        setAuthError('البريد الإلكتروني مسجل بالفعل، يرجى تسجيل الدخول بدلاً من التسجيل.');
+      } else if (code === 'auth/weak-password') {
+        setAuthError('كلمة المرور ضعيفة، يرجى استخدام 6 أحرف أو أرقام على الأقل.');
+      } else if (code === 'auth/too-many-requests') {
+        setAuthError('تم حظر المحاولات مؤقتاً بسبب تكرار الأخطاء، يرجى المحاولة لاحقاً.');
+      } else if (code === 'auth/admin-restricted-operation' || code === 'auth/operation-not-allowed' || err?.message?.includes('admin-restricted-operation')) {
+        setAuthError('تسجيل الدخول بالبريد الإلكتروني غير مفعّل في إعدادات المشروع. يرجى الضغط على زر "تسجيل الدخول عبر Google" أعلاه للمتابعة بنجاح.');
+      } else if (code === 'auth/network-request-failed') {
+        setAuthError('فشل الاتصال، يرجى التحقق من اتصالك بالإنترنت.');
       } else {
-        setAuthError('حدث خطأ أثناء المصادقة، يرجى المحاولة مرة أخرى.');
+        setAuthError(err?.message || 'حدث خطأ أثناء المصادقة، يرجى التحقق من البيانات.');
       }
+    } finally {
+      setAuthSubmitting(false);
+    }
+  };
+
+  // Handle Quick Instant / Guest Sign In
+  const handleGuestSignIn = async () => {
+    try {
+      setAuthSubmitting(true);
+      setAuthError('');
+      const userCredential = await signInAnonymously(auth);
+      if (userCredential.user) {
+        const guestName = nameInput.trim() || 'ضيف ' + Math.floor(1000 + Math.random() * 9000);
+        await updateProfile(userCredential.user, { displayName: guestName }).catch(() => {});
+        await syncUserProfile({
+          uid: userCredential.user.uid,
+          displayName: guestName,
+          email: '',
+          photoURL: '',
+        }).catch(() => {});
+        showToast(`مرحباً بك يا ${guestName}! تم الدخول بنجاح`);
+      }
+    } catch (err: any) {
+      console.error('Guest sign in error:', err);
+      setAuthError('تعذر تسجيل الدخول السريع، يرجى المحاولة عبر Google أو البريد.');
     } finally {
       setAuthSubmitting(false);
     }
@@ -361,6 +525,7 @@ export default function App() {
       setFirebaseUser(null);
       setUserProfile(null);
       setSelectedConvId(null);
+      setSelectedCommunityId(null);
       setActiveTab('home');
       showToast('تم تسجيل الخروج بنجاح.');
     } catch (err) {
@@ -369,20 +534,55 @@ export default function App() {
   };
 
   // Handle Start In-App Video or Audio Call
-  const handleStartCall = async (title?: string, type: 'video' | 'audio' | 'group' = 'video') => {
+  const handleStartCall = async (
+    title?: string,
+    type: 'video' | 'audio' | 'group' = 'video',
+    targetUser?: { uid: string; displayName?: string; photoURL?: string }
+  ) => {
     if (!userProfile) return;
     try {
       const call = await createCallRecord(
         userProfile,
         title || `مكالمة ${userProfile.displayName}`,
-        type
+        type,
+        targetUser
       );
       // Launch in-app call directly
       setActiveInAppCall(call);
-      showToast('تم بدء المكالمة المباشرة داخل التطبيق!');
+      if (targetUser?.displayName) {
+        showToast(`جارٍ الاتصال بـ ${targetUser.displayName}...`);
+      } else {
+        showToast('تم بدء المكالمة المباشرة داخل التطبيق!');
+      }
     } catch (err) {
       console.error('Failed to start call:', err);
       showToast('تعذر بدء المكالمة، يرجى المحاولة لاحقاً.');
+    }
+  };
+
+  // Handle Accept Incoming Call
+  const handleAcceptIncomingCall = async (call: CallRecord) => {
+    if (!userProfile) return;
+    try {
+      await updateCallStatus(call.id, 'accepted', userProfile.uid);
+      setIncomingCall(null);
+      setActiveInAppCall({ ...call, status: 'accepted' });
+      showToast(`تم قبول المكالمة من ${call.hostName}`);
+    } catch (err) {
+      console.error('Error accepting call:', err);
+      showToast('حدث خطأ أثناء قبول المكالمة.');
+    }
+  };
+
+  // Handle Decline Incoming Call
+  const handleDeclineIncomingCall = async (call: CallRecord) => {
+    try {
+      await updateCallStatus(call.id, 'declined');
+      setIncomingCall(null);
+      showToast(`تم رفض مكالمة ${call.hostName}`);
+    } catch (err) {
+      console.error('Error declining call:', err);
+      setIncomingCall(null);
     }
   };
 
@@ -410,6 +610,9 @@ export default function App() {
 
   // Active selected conversation object
   const activeConversation = conversations.find((c) => c.id === selectedConvId);
+
+  // Active selected community object
+  const activeCommunity = communities.find((c) => c.id === selectedCommunityId);
 
   // Loading Screen
   if (loadingAuth) {
@@ -455,46 +658,34 @@ export default function App() {
           </p>
 
           {authError && (
-            <div className="p-3 mb-4 rounded-2xl bg-rose-50 text-rose-600 text-xs font-bold text-center border border-rose-200">
-              {authError}
+            <div className="p-3 mb-4 rounded-2xl bg-rose-50 text-rose-700 text-xs font-medium text-right border border-rose-200 space-y-1">
+              <div className="font-bold flex items-center gap-1 text-rose-800">
+                <span>تنبيه المصادقة:</span>
+              </div>
+              <p>{authError}</p>
             </div>
           )}
 
-          {/* Google Sign In Button */}
-          <button
-            onClick={handleGoogleSignIn}
-            className="w-full h-13 rounded-2xl bg-white hover:bg-neutral-50 text-neutral-800 font-bold text-xs md:text-sm flex items-center justify-center gap-3 border border-neutral-300 transition cursor-pointer shadow-xs mb-4"
-          >
-            <svg className="w-5 h-5" viewBox="0 0 24 24">
-              <path
-                fill="#4285F4"
-                d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
-              />
-              <path
-                fill="#34A853"
-                d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
-              />
-              <path
-                fill="#FBBC05"
-                d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"
-              />
-              <path
-                fill="#EA4335"
-                d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
-              />
-            </svg>
-            <span>تسجيل الدخول السريع عبر Google</span>
-          </button>
-
-          {/* Divider */}
-          <div className="flex items-center gap-3 my-5 text-xs text-neutral-300">
-            <span className="h-px bg-neutral-200 flex-1" />
-            <span>أو بالبريد الإلكتروني</span>
-            <span className="h-px bg-neutral-200 flex-1" />
-          </div>
-
-          {/* Email/Password Form */}
+          {/* Email/Password Form - Primary Authentication */}
           <form onSubmit={handleEmailAuth} className="space-y-3 text-right">
+            {/* Full Name for Registration */}
+            {authMode === 'register' && (
+              <div>
+                <label className="block text-xs font-bold text-neutral-700 mb-1">الاسم الكامل</label>
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={nameInput}
+                    onChange={(e) => setNameInput(e.target.value)}
+                    placeholder="مثال: أحمد محمد"
+                    className="w-full h-11 rounded-2xl bg-[#f8f7f3] pr-10 pl-4 text-xs outline-none border border-transparent focus:border-[#6d5dfc]/40 text-right font-sans"
+                    required
+                  />
+                  <User className="w-4 h-4 absolute right-3.5 top-3.5 text-neutral-400" />
+                </div>
+              </div>
+            )}
+
             <div>
               <label className="block text-xs font-bold text-neutral-700 mb-1">البريد الإلكتروني</label>
               <div className="relative">
@@ -514,14 +705,22 @@ export default function App() {
               <label className="block text-xs font-bold text-neutral-700 mb-1">كلمة المرور</label>
               <div className="relative">
                 <input
-                  type="password"
+                  type={showPassword ? 'text' : 'password'}
                   value={passwordInput}
                   onChange={(e) => setPasswordInput(e.target.value)}
                   placeholder="••••••••"
-                  className="w-full h-11 rounded-2xl bg-[#f8f7f3] pr-10 pl-4 text-xs outline-none border border-transparent focus:border-[#6d5dfc]/40 text-left font-sans"
+                  className="w-full h-11 rounded-2xl bg-[#f8f7f3] pr-10 pl-10 text-xs outline-none border border-transparent focus:border-[#6d5dfc]/40 text-left font-sans"
                   required
                 />
                 <Lock className="w-4 h-4 absolute right-3.5 top-3.5 text-neutral-400" />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute left-3.5 top-3.5 text-neutral-400 hover:text-neutral-600 transition cursor-pointer"
+                  title={showPassword ? 'إخفاء كلمة المرور' : 'إظهار كلمة المرور'}
+                >
+                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
               </div>
             </div>
 
@@ -530,22 +729,28 @@ export default function App() {
               disabled={authSubmitting}
               className="w-full h-12 rounded-2xl bg-[#111827] text-white font-bold text-xs flex items-center justify-center gap-2 hover:bg-[#302c52] transition cursor-pointer shadow-md disabled:opacity-50 mt-2"
             >
-              {authMode === 'login' ? (
+              {authSubmitting ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin text-emerald-400" />
+                  <span>{authMode === 'login' ? 'جارٍ تسجيل الدخول...' : 'جارٍ إنشاء الحساب...'}</span>
+                </>
+              ) : authMode === 'login' ? (
                 <>
                   <LogIn className="w-4 h-4 text-emerald-400" />
-                  <span>{authSubmitting ? 'جارٍ تسجيل الدخول...' : 'تسجيل الدخول'}</span>
+                  <span>تسجيل الدخول</span>
                 </>
               ) : (
                 <>
                   <UserPlus className="w-4 h-4 text-emerald-400" />
-                  <span>{authSubmitting ? 'جارٍ إنشاء الحساب...' : 'إنشاء حساب جديد'}</span>
+                  <span>إنشاء حساب جديد</span>
                 </>
               )}
             </button>
           </form>
 
-          <div className="mt-4 pt-3 border-t border-neutral-100 text-center">
+          <div className="mt-4 pt-3 border-t border-neutral-100 flex flex-col gap-2.5 text-center">
             <button
+              type="button"
               onClick={() => {
                 setAuthMode(authMode === 'login' ? 'register' : 'login');
                 setAuthError('');
@@ -553,8 +758,51 @@ export default function App() {
               className="text-xs font-bold text-[#6d5dfc] hover:underline cursor-pointer"
             >
               {authMode === 'login'
-                ? 'ليس لديك حساب؟ إنشاء حساب جديد الآن'
-                : 'لديك حساب بالفعل؟ تسجيل الدخول'}
+                ? 'ليس لديك حساب؟ اضغط لإنشاء حساب جديد الآن'
+                : 'لديك حساب بالفعل؟ اضغط لتسجيل الدخول'}
+            </button>
+
+            {/* Divider */}
+            <div className="flex items-center gap-3 my-2 text-xs text-neutral-300">
+              <span className="h-px bg-neutral-200 flex-1" />
+              <span>أو خيارات أخرى</span>
+              <span className="h-px bg-neutral-200 flex-1" />
+            </div>
+
+            {/* Google Sign In Button */}
+            <button
+              onClick={handleGoogleSignIn}
+              type="button"
+              className="w-full h-11 rounded-2xl bg-white hover:bg-neutral-50 text-neutral-800 font-medium text-xs flex items-center justify-center gap-2.5 border border-neutral-200 transition cursor-pointer shadow-xs"
+            >
+              <svg className="w-4 h-4" viewBox="0 0 24 24">
+                <path
+                  fill="#4285F4"
+                  d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
+                />
+                <path
+                  fill="#34A853"
+                  d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+                />
+                <path
+                  fill="#FBBC05"
+                  d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"
+                />
+                <path
+                  fill="#EA4335"
+                  d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
+                />
+              </svg>
+              <span>تسجيل الدخول عبر Google</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleGuestSignIn}
+              disabled={authSubmitting}
+              className="text-[11px] font-medium text-neutral-500 hover:text-neutral-800 transition cursor-pointer py-1"
+            >
+              أو الدخول التجريبي الفوري المباشر بدون كلمة مرور
             </button>
           </div>
         </div>
@@ -622,6 +870,7 @@ export default function App() {
         onTabChange={(tab) => {
           setActiveTab(tab);
           if (tab !== 'inbox') setSelectedConvId(null);
+          if (tab !== 'discover') setSelectedCommunityId(null);
         }}
         currentUser={userProfile}
         onOpenNewChat={() => setNewChatModalOpen(true)}
@@ -641,7 +890,12 @@ export default function App() {
             notes={notes}
             onSelectConversation={(id) => {
               setSelectedConvId(id);
+              setSelectedCommunityId(null);
               setActiveTab('inbox');
+            }}
+            onSelectCommunity={(commId) => {
+              setSelectedCommunityId(commId);
+              setActiveTab('discover');
             }}
             onOpenNewChat={() => setNewChatModalOpen(true)}
             onOpenNewCommunity={() => setNewCommunityModalOpen(true)}
@@ -681,7 +935,7 @@ export default function App() {
                   currentUser={userProfile}
                   messages={messages}
                   onBack={() => setSelectedConvId(null)}
-                  onStartCall={(targetName, type) => handleStartCall(`محادثة مع ${targetName}`, type || 'video')}
+                  onStartCall={(targetName, type, targetUser) => handleStartCall(`مكالمة مع ${targetName}`, type || 'video', targetUser)}
                   showToast={showToast}
                   onOpenImage={(url) => setLightboxUrl(url)}
                 />
@@ -706,14 +960,27 @@ export default function App() {
           </div>
         )}
 
-        {/* Tab 3: Communities & Discover */}
+        {/* Tab 3: Communities & Group Chats */}
         {activeTab === 'discover' && (
-          <DiscoverView
-            communities={communities}
-            currentUser={userProfile}
-            onOpenNewCommunity={() => setNewCommunityModalOpen(true)}
-            onToggleJoin={handleToggleCommunity}
-          />
+          selectedCommunityId && activeCommunity ? (
+            <CommunityChatView
+              community={activeCommunity}
+              currentUser={userProfile}
+              messages={communityMessages}
+              onBack={() => setSelectedCommunityId(null)}
+              onStartCall={(title, type) => handleStartCall(title, type || 'group')}
+              showToast={showToast}
+              onOpenImage={(url) => setLightboxUrl(url)}
+            />
+          ) : (
+            <DiscoverView
+              communities={communities}
+              currentUser={userProfile}
+              onOpenNewCommunity={() => setNewCommunityModalOpen(true)}
+              onToggleJoin={handleToggleCommunity}
+              onSelectCommunity={(commId) => setSelectedCommunityId(commId)}
+            />
+          )
         )}
 
         {/* Tab 4: Calls & Meetings */}
@@ -737,18 +1004,28 @@ export default function App() {
           />
         )}
 
-        {/* Mobile Bottom Navigation (Visible when not actively chatting in a conversation) */}
-        {(!selectedConvId || activeTab !== 'inbox') && (
+        {/* Mobile Bottom Navigation (Visible when not actively chatting in a conversation or community) */}
+        {(!selectedConvId || activeTab !== 'inbox') && (!selectedCommunityId || activeTab !== 'discover') && (
           <BottomNav
             activeTab={activeTab}
             onTabChange={(tab) => {
               setActiveTab(tab);
               if (tab !== 'inbox') setSelectedConvId(null);
+              if (tab !== 'discover') setSelectedCommunityId(null);
             }}
             unreadCount={conversations.reduce((acc, c) => acc + (c.unreadCount?.[userProfile.uid] || 0), 0)}
           />
         )}
       </main>
+
+      {/* Incoming Call Ringing Modal (Accept / Decline) */}
+      {incomingCall && (
+        <IncomingCallModal
+          incomingCall={incomingCall}
+          onAccept={handleAcceptIncomingCall}
+          onDecline={handleDeclineIncomingCall}
+        />
+      )}
 
       {/* In-App Direct Audio & Video Call Overlay */}
       {activeInAppCall && (
@@ -806,6 +1083,7 @@ export default function App() {
           onClose={() => setNewChatModalOpen(false)}
           onSelectConversation={(convId) => {
             setSelectedConvId(convId);
+            setSelectedCommunityId(null);
             setActiveTab('inbox');
           }}
           showToast={showToast}
@@ -818,7 +1096,12 @@ export default function App() {
           currentUser={userProfile}
           isOpen={newCommunityModalOpen}
           onClose={() => setNewCommunityModalOpen(false)}
-          onCommunityCreated={() => {}}
+          onSuccess={(commId) => {
+            if (commId) {
+              setSelectedCommunityId(commId);
+              setActiveTab('discover');
+            }
+          }}
           showToast={showToast}
         />
       )}

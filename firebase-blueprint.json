@@ -111,6 +111,10 @@
       "schema": "Community",
       "description": "Public circles and groups"
     },
+    "/communities/{communityId}/messages/{messageId}": {
+      "schema": "Message",
+      "description": "Messages inside a community group chat"
+    },
     "/calls/{callId}": {
       "schema": "Call",
       "description": "Call records and links"

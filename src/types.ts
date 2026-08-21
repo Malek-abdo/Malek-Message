@@ -69,6 +69,11 @@ export interface Community {
   membersCount: number;
   letters: string;
   tone: string;
+  coverUrl?: string;
+  lastMessage?: string;
+  lastMessageTime?: string;
+  lastMessageTimestamp?: number;
+  lastSenderName?: string;
   createdAt: string;
 }
 
@@ -77,8 +82,13 @@ export interface CallRecord {
   title: string;
   hostId: string;
   hostName: string;
+  hostPhoto?: string;
+  targetId?: string;
+  targetName?: string;
+  targetPhoto?: string;
   link: string;
   type: 'video' | 'audio' | 'group';
+  status?: 'ringing' | 'accepted' | 'declined' | 'ended' | 'missed';
   createdAt: string;
   participants: string[];
 }

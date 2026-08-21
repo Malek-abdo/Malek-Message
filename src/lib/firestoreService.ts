@@ -20,6 +20,27 @@ import {
 import { db } from './firebase';
 import { UserProfile, Conversation, ChatMessage, MessageAttachment, Community, CallRecord, QuickNote } from '../types';
 
+// Helper to recursively remove undefined fields for Firestore safety
+export function sanitizeFirestoreData<T>(obj: T): T {
+  if (obj === null || obj === undefined) {
+    return '' as any;
+  }
+  if (Array.isArray(obj)) {
+    return obj.map((item) => sanitizeFirestoreData(item)).filter((item) => item !== undefined) as any;
+  }
+  if (typeof obj === 'object' && !(obj instanceof Date)) {
+    const clean: any = {};
+    for (const key of Object.keys(obj as any)) {
+      const val = (obj as any)[key];
+      if (val !== undefined) {
+        clean[key] = sanitizeFirestoreData(val);
+      }
+    }
+    return clean;
+  }
+  return obj;
+}
+
 // Helper to get initials & tone
 export function getInitials(name?: string): string {
   if (!name || !name.trim()) return 'م';
@@ -100,24 +121,33 @@ export async function completeUserOnboarding(
   }
 ): Promise<void> {
   const userRef = doc(db, 'users', uid);
-  await updateDoc(userRef, {
-    username: data.username.toLowerCase(),
-    phoneNumber: data.phoneNumber,
-    countryCode: data.countryCode,
-    countryName: data.countryName,
-    displayName: data.displayName || 'مستخدم',
-    ...(data.photoURL && { photoURL: data.photoURL }),
-    onboardingCompleted: true,
-    lastSeen: new Date().toISOString(),
-  });
+  await setDoc(
+    userRef,
+    {
+      uid,
+      username: data.username.toLowerCase(),
+      phoneNumber: data.phoneNumber,
+      countryCode: data.countryCode,
+      countryName: data.countryName,
+      displayName: data.displayName || 'مستخدم',
+      ...(data.photoURL ? { photoURL: data.photoURL } : {}),
+      onboardingCompleted: true,
+      lastSeen: new Date().toISOString(),
+    },
+    { merge: true }
+  );
 }
 
 export async function updateUserProfile(uid: string, data: Partial<UserProfile>): Promise<void> {
   const userRef = doc(db, 'users', uid);
-  await updateDoc(userRef, {
-    ...data,
-    lastSeen: new Date().toISOString(),
-  });
+  await setDoc(
+    userRef,
+    {
+      ...data,
+      lastSeen: new Date().toISOString(),
+    },
+    { merge: true }
+  );
 }
 
 export async function searchUsers(searchTerm: string, currentUid: string): Promise<UserProfile[]> {
@@ -269,22 +299,22 @@ export async function getOrCreateConversation(currentUser: UserProfile, targetUs
 
   const now = new Date();
   const timeStr = now.toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' });
-  const newConvData: Omit<Conversation, 'id'> & { lastMessageTimestamp: number } = {
+  const newConvData = sanitizeFirestoreData({
     participants: [currentUser.uid, targetUser.uid],
     participantData: {
       [currentUser.uid]: {
-        displayName: currentUser.displayName,
-        username: currentUser.username,
-        photoURL: currentUser.photoURL,
-        phoneNumber: currentUser.phoneNumber ? `${currentUser.countryCode || ''} ${currentUser.phoneNumber}` : undefined,
+        displayName: currentUser.displayName || 'مستخدم',
+        username: currentUser.username || '',
+        photoURL: currentUser.photoURL || '',
+        phoneNumber: currentUser.phoneNumber ? `${currentUser.countryCode || ''} ${currentUser.phoneNumber}` : '',
         letters: getInitials(currentUser.displayName),
         tone: getRandomTone(currentUser.uid),
       },
       [targetUser.uid]: {
-        displayName: targetUser.displayName,
-        username: targetUser.username,
-        photoURL: targetUser.photoURL,
-        phoneNumber: targetUser.phoneNumber ? `${targetUser.countryCode || ''} ${targetUser.phoneNumber}` : undefined,
+        displayName: targetUser.displayName || 'مستخدم',
+        username: targetUser.username || '',
+        photoURL: targetUser.photoURL || '',
+        phoneNumber: targetUser.phoneNumber ? `${targetUser.countryCode || ''} ${targetUser.phoneNumber}` : '',
         letters: getInitials(targetUser.displayName),
         tone: getRandomTone(targetUser.uid),
       },
@@ -294,7 +324,7 @@ export async function getOrCreateConversation(currentUser: UserProfile, targetUs
     lastMessageTimestamp: Date.now(),
     lastSenderId: currentUser.uid,
     createdAt: now.toISOString(),
-  };
+  });
 
   const docRef = await addDoc(convsRef, newConvData);
   return docRef.id;
@@ -359,7 +389,7 @@ export async function sendMessage(
   const currentTs = Date.now();
   const firstAttachment = attachmentsList[0];
 
-  const msgData: any = {
+  const msgData: any = sanitizeFirestoreData({
     senderId: sender.uid,
     senderName: sender.displayName || 'مستخدم',
     senderUsername: sender.username || '',
@@ -374,7 +404,7 @@ export async function sendMessage(
       fileType: firstAttachment.fileType || 'file',
       fileSize: firstAttachment.fileSize || 0,
     }),
-  };
+  });
 
   await addDoc(msgsRef, msgData);
 
@@ -474,18 +504,18 @@ export async function createCommunity(
   coverUrl?: string
 ): Promise<string> {
   const commsRef = collection(db, 'communities');
-  const newComm = {
+  const newComm = sanitizeFirestoreData({
     title: title.trim(),
     description: description.trim(),
     createdBy: user.uid,
-    creatorName: user.displayName,
+    creatorName: user.displayName || 'مستخدم',
     members: [user.uid],
     membersCount: 1,
     letters: getInitials(title),
     tone: getRandomTone(title),
     ...(coverUrl && { coverUrl }),
     createdAt: new Date().toISOString(),
-  };
+  });
   const res = await addDoc(commsRef, newComm);
   return res.id;
 }
@@ -505,6 +535,136 @@ export async function toggleCommunityMembership(communityId: string, uid: string
   }
 }
 
+// 3.1 Community Messages & Group Discussions
+export function subscribeToCommunityMessages(communityId: string, onUpdate: (msgs: ChatMessage[]) => void) {
+  const msgsRef = collection(db, 'communities', communityId, 'messages');
+
+  const processSnap = (snapshot: any) => {
+    const list: ChatMessage[] = [];
+    snapshot.forEach((d: any) => {
+      list.push(normalizeMessage(d.id, d.data()));
+    });
+    // Chronological sorting (oldest first at top, newest at bottom)
+    list.sort((a, b) => {
+      const diff = (a.timestamp || 0) - (b.timestamp || 0);
+      if (diff !== 0) return diff;
+      return a.id.localeCompare(b.id);
+    });
+    onUpdate(list);
+  };
+
+  try {
+    const q = query(msgsRef, orderBy('timestamp', 'asc'));
+    return onSnapshot(
+      q,
+      processSnap,
+      (err) => {
+        console.warn('subscribeToCommunityMessages orderBy warning, using collection listener:', err);
+        return onSnapshot(msgsRef, processSnap, (err2) => {
+          console.error('subscribeToCommunityMessages fallback error:', err2);
+        });
+      }
+    );
+  } catch {
+    return onSnapshot(msgsRef, processSnap);
+  }
+}
+
+export async function sendCommunityMessage(
+  communityId: string,
+  sender: UserProfile,
+  text: string,
+  attachment?: MessageAttachment | MessageAttachment[]
+): Promise<void> {
+  const cleanText = text ? text.trim() : '';
+
+  // Normalize attachments input
+  let attachmentsList: MessageAttachment[] = [];
+  if (Array.isArray(attachment)) {
+    attachmentsList = attachment.filter((a) => !!a && !!a.fileUrl);
+  } else if (attachment && attachment.fileUrl) {
+    attachmentsList = [attachment];
+  }
+
+  if (!cleanText && attachmentsList.length === 0) return;
+
+  const now = new Date();
+  const timeStr = now.toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' });
+  const msgsRef = collection(db, 'communities', communityId, 'messages');
+
+  const currentTs = Date.now();
+  const firstAttachment = attachmentsList[0];
+
+  const msgData: any = sanitizeFirestoreData({
+    senderId: sender.uid,
+    senderName: sender.displayName || 'عضو',
+    senderUsername: sender.username || '',
+    text: cleanText,
+    createdAt: timeStr,
+    timestamp: currentTs,
+    read: true,
+    attachments: attachmentsList,
+    ...(firstAttachment && {
+      fileUrl: firstAttachment.fileUrl,
+      fileName: firstAttachment.fileName || 'ملف مرفق',
+      fileType: firstAttachment.fileType || 'file',
+      fileSize: firstAttachment.fileSize || 0,
+    }),
+  });
+
+  await addDoc(msgsRef, msgData);
+
+  // Generate friendly preview text for community card
+  let previewText = cleanText;
+  if (!previewText) {
+    if (attachmentsList.length === 1) {
+      const type = attachmentsList[0].fileType;
+      previewText = type === 'image' ? '📷 صورة' : type === 'video' ? '🎥 فيديو' : type === 'audio' ? '🎵 تسجيل صوتي' : '📎 ملف';
+    } else if (attachmentsList.length > 1) {
+      previewText = `📎 ${attachmentsList.length} مرفقات`;
+    }
+  }
+
+  // Update community document with latest message info
+  try {
+    const commRef = doc(db, 'communities', communityId);
+    await updateDoc(commRef, {
+      lastMessage: previewText,
+      lastMessageTime: timeStr,
+      lastMessageTimestamp: currentTs,
+      lastSenderName: sender.displayName || 'عضو',
+    });
+  } catch (err) {
+    console.warn('Community preview update warning:', err);
+  }
+}
+
+export async function deleteCommunityMessage(communityId: string, messageId: string): Promise<void> {
+  const msgDocRef = doc(db, 'communities', communityId, 'messages', messageId);
+  await deleteDoc(msgDocRef);
+}
+
+export async function clearCommunityMessages(communityId: string): Promise<void> {
+  const msgsRef = collection(db, 'communities', communityId, 'messages');
+  const snap = await getDocs(msgsRef);
+
+  if (!snap.empty) {
+    const batch = writeBatch(db);
+    snap.docs.forEach((docSnap) => {
+      batch.delete(docSnap.ref);
+    });
+    await batch.commit();
+  }
+
+  const commRef = doc(db, 'communities', communityId);
+  await updateDoc(commRef, {
+    lastMessage: 'تم مسح المحادثات',
+    lastMessageTime: new Date().toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' }),
+    lastMessageTimestamp: Date.now(),
+    lastSenderName: '',
+  }).catch(() => {});
+}
+
 // 4. Calls
 export function subscribeToCalls(uid: string, onUpdate: (calls: CallRecord[]) => void) {
   const callsRef = collection(db, 'calls');
@@ -512,7 +672,11 @@ export function subscribeToCalls(uid: string, onUpdate: (calls: CallRecord[]) =>
     const list: CallRecord[] = [];
     snapshot.forEach((d) => {
       const data = d.data() as Omit<CallRecord, 'id'>;
-      if (data.hostId === uid || (data.participants && data.participants.includes(uid))) {
+      if (
+        data.hostId === uid || 
+        data.targetId === uid || 
+        (data.participants && data.participants.includes(uid))
+      ) {
         list.push({ id: d.id, ...data });
       }
     });
@@ -523,21 +687,51 @@ export function subscribeToCalls(uid: string, onUpdate: (calls: CallRecord[]) =>
   });
 }
 
-export async function createCallRecord(user: UserProfile, title: string, type: 'video' | 'audio' | 'group' = 'group'): Promise<CallRecord> {
+export async function createCallRecord(
+  user: UserProfile,
+  title: string,
+  type: 'video' | 'audio' | 'group' = 'group',
+  targetUser?: { uid: string; displayName?: string; photoURL?: string }
+): Promise<CallRecord> {
   const callsRef = collection(db, 'calls');
   const callCode = 'malek-' + Math.random().toString(36).substring(2, 7) + '-' + Math.random().toString(36).substring(2, 6);
-  const newCall = {
-    title: title.trim() || `مكالمة ${user.displayName}`,
+  const participants = [user.uid];
+  if (targetUser?.uid && !participants.includes(targetUser.uid)) {
+    participants.push(targetUser.uid);
+  }
+
+  const newCall = sanitizeFirestoreData({
+    title: title.trim() || `مكالمة ${user.displayName || 'مستخدم'}`,
     hostId: user.uid,
-    hostName: user.displayName,
+    hostName: user.displayName || 'مستخدم',
+    hostPhoto: user.photoURL || '',
+    targetId: targetUser?.uid || '',
+    targetName: targetUser?.displayName || '',
+    targetPhoto: targetUser?.photoURL || '',
     link: `https://meet.jit.si/${callCode}`,
     type,
+    status: targetUser?.uid ? 'ringing' : 'accepted',
     createdAt: new Date().toISOString(),
-    participants: [user.uid],
-  };
+    participants,
+  });
 
   const docRef = await addDoc(callsRef, newCall);
-  return { id: docRef.id, ...newCall };
+  return { id: docRef.id, ...newCall } as CallRecord;
+}
+
+export async function updateCallStatus(
+  callId: string,
+  status: 'ringing' | 'accepted' | 'declined' | 'ended' | 'missed',
+  participantUid?: string
+): Promise<void> {
+  const callRef = doc(db, 'calls', callId);
+  const updateData: any = { status };
+  if (participantUid && status === 'accepted') {
+    updateData.participants = arrayUnion(participantUid);
+  }
+  await updateDoc(callRef, sanitizeFirestoreData(updateData)).catch((err) => {
+    console.warn('updateCallStatus error:', err);
+  });
 }
 
 // 5. Quick Notes
@@ -557,14 +751,14 @@ export function subscribeToNotes(onUpdate: (notes: QuickNote[]) => void) {
 
 export async function createQuickNote(user: UserProfile, content: string, imageUrl?: string): Promise<string> {
   const notesRef = collection(db, 'notes');
-  const newNote = {
+  const newNote = sanitizeFirestoreData({
     authorId: user.uid,
-    authorName: user.displayName,
-    authorUsername: user.username,
+    authorName: user.displayName || 'مستخدم',
+    authorUsername: user.username || '',
     content: content.trim(),
     ...(imageUrl && { imageUrl }),
     createdAt: new Date().toISOString(),
-  };
+  });
   const docRef = await addDoc(notesRef, newNote);
   return docRef.id;
 }

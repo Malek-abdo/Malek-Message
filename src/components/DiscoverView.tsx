@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Compass, Plus, Users, Search, Check } from 'lucide-react';
+import { Compass, Plus, Users, Search, Check, MessageSquare, ArrowLeft } from 'lucide-react';
 import { Community, UserProfile } from '../types';
 import { getInitials, getRandomTone } from '../lib/firestoreService';
 
@@ -8,6 +8,7 @@ interface DiscoverViewProps {
   currentUser: UserProfile;
   onOpenNewCommunity: () => void;
   onToggleJoin: (communityId: string) => void;
+  onSelectCommunity: (communityId: string) => void;
 }
 
 export const DiscoverView: React.FC<DiscoverViewProps> = ({
@@ -15,6 +16,7 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
   currentUser,
   onOpenNewCommunity,
   onToggleJoin,
+  onSelectCommunity,
 }) => {
   const [search, setSearch] = useState('');
 
@@ -30,7 +32,7 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h2 className="text-2xl md:text-3xl font-black text-[#18181b]">المجتمعات والقنوات</h2>
-          <p className="text-xs text-neutral-400">انضم إلى مجتمعات تناسب اهتماماتك أو أنشئ مجتمعك الخاص</p>
+          <p className="text-xs text-neutral-400">انضم إلى مجتمعات تناسب اهتماماتك أو أنشئ مجتمعك الخاص وتحدث مع الأعضاء</p>
         </div>
 
         <button
@@ -75,41 +77,74 @@ export const DiscoverView: React.FC<DiscoverViewProps> = ({
             return (
               <div
                 key={comm.id}
-                className="bg-white rounded-3xl p-5 border border-neutral-200/80 shadow-xs flex flex-col justify-between"
+                className="bg-white rounded-3xl p-5 border border-neutral-200/80 shadow-xs flex flex-col justify-between hover:shadow-md transition group"
               >
                 <div>
-                  <div className="flex items-center gap-3 mb-3">
+                  <div
+                    onClick={() => onSelectCommunity(comm.id)}
+                    className="flex items-center gap-3 mb-3 cursor-pointer"
+                  >
                     <div
                       className={`w-12 h-12 rounded-2xl ${
                         comm.tone || getRandomTone(comm.id)
-                      } flex items-center justify-center font-black text-sm shrink-0 shadow-xs`}
+                      } flex items-center justify-center font-black text-sm shrink-0 shadow-xs group-hover:scale-105 transition`}
                     >
                       {comm.letters || getInitials(comm.title)}
                     </div>
-                    <div className="min-w-0">
-                      <h3 className="text-sm font-black text-[#18181b] truncate">{comm.title}</h3>
+                    <div className="min-w-0 flex-1">
+                      <h3 className="text-sm font-black text-[#18181b] truncate group-hover:text-[#6d5dfc] transition">
+                        {comm.title}
+                      </h3>
                       <span className="text-[11px] text-neutral-400 flex items-center gap-1">
-                        <Users className="w-3 h-3" />
-                        {comm.membersCount || 1} عضو
+                        <Users className="w-3 h-3 text-emerald-600" />
+                        {comm.membersCount || (comm.members?.length ?? 1)} عضو
                       </span>
                     </div>
                   </div>
 
-                  <p className="text-xs text-neutral-600 line-clamp-3 mb-4 leading-relaxed">
+                  <p
+                    onClick={() => onSelectCommunity(comm.id)}
+                    className="text-xs text-neutral-600 line-clamp-3 mb-4 leading-relaxed cursor-pointer"
+                  >
                     {comm.description || 'مجتمع للتواصل ومشاركة الأفكار والملفات.'}
                   </p>
+
+                  {/* Last Message Preview if exists */}
+                  {comm.lastMessage && (
+                    <div
+                      onClick={() => onSelectCommunity(comm.id)}
+                      className="p-2.5 rounded-xl bg-[#f8f7f3] text-[11px] text-neutral-600 mb-3 flex items-center gap-2 cursor-pointer border border-neutral-200/50"
+                    >
+                      <MessageSquare className="w-3.5 h-3.5 text-[#6d5dfc] shrink-0" />
+                      <span className="truncate flex-1">
+                        {comm.lastSenderName ? `${comm.lastSenderName}: ` : ''}
+                        {comm.lastMessage}
+                      </span>
+                      {comm.lastMessageTime && (
+                        <span className="text-[10px] text-neutral-400 shrink-0">
+                          {comm.lastMessageTime}
+                        </span>
+                      )}
+                    </div>
+                  )}
                 </div>
 
-                <div className="pt-3 border-t border-neutral-100 flex items-center justify-between">
-                  <span className="text-[10px] text-neutral-400">
-                    بواسطة: {comm.creatorName || 'عضو'}
-                  </span>
+                <div className="pt-3 border-t border-neutral-100 flex items-center justify-between gap-2">
+                  <button
+                    onClick={() => onSelectCommunity(comm.id)}
+                    className="flex-1 py-2 px-3 rounded-xl bg-neutral-900 hover:bg-[#302c52] text-white text-xs font-bold transition cursor-pointer flex items-center justify-center gap-1.5 shadow-xs"
+                  >
+                    <MessageSquare className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>المحادثة</span>
+                    <ArrowLeft className="w-3 h-3" />
+                  </button>
+
                   <button
                     onClick={() => onToggleJoin(comm.id)}
-                    className={`px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-1.5 ${
+                    className={`py-2 px-3 rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-1.5 shrink-0 ${
                       isMember
                         ? 'bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-rose-50 hover:text-rose-600 hover:border-rose-200'
-                        : 'bg-[#111827] text-white hover:bg-[#302c52]'
+                        : 'bg-neutral-100 text-neutral-700 hover:bg-neutral-200'
                     }`}
                   >
                     {isMember ? (

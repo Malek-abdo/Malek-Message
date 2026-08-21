@@ -102,6 +102,7 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
         countryCode: selectedCountry.dialCode,
         countryName: selectedCountry.name,
         displayName: displayName.trim() || currentUser.displayName || cleanUsername,
+        photoURL: photoURL || currentUser.photoURL || '',
       });
 
       onComplete({
@@ -117,7 +118,14 @@ export const OnboardingModal: React.FC<OnboardingModalProps> = ({
       showToast(`أهلاً بك @${cleanUsername}! تم حفظ بياناتك بنجاح.`);
     } catch (err: any) {
       console.error('Failed to complete onboarding:', err);
-      setError('حدث خطأ أثناء حفظ البيانات، يرجى المحاولة مرة أخرى.');
+      const errMsg = err?.message || '';
+      if (errMsg.includes('permission') || errMsg.includes('Missing or insufficient permissions')) {
+        setError('يرجى التحقق من صلاحيات Firestore في الكونسول (Firestore Rules) أو تحديث الصفحة وإعادة المحاولة.');
+      } else if (errMsg.includes('offline') || errMsg.includes('network')) {
+        setError('تعذر الاتصال بقاعدة البيانات، يرجى التحقق من اتصالك بالإنترنت.');
+      } else {
+        setError(`حدث خطأ أثناء حفظ البيانات (${err?.code || err?.message || 'يرجى المحاولة مجدداً'}).`);
+      }
     } finally {
       setLoading(false);
     }

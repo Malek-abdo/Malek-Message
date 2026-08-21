@@ -21,6 +21,7 @@ interface HomeFeedProps {
   calls: CallRecord[];
   notes: QuickNote[];
   onSelectConversation: (convId: string) => void;
+  onSelectCommunity?: (communityId: string) => void;
   onOpenNewChat: () => void;
   onOpenNewCommunity: () => void;
   onOpenNewNote: () => void;
@@ -35,6 +36,7 @@ export const HomeFeed: React.FC<HomeFeedProps> = ({
   calls,
   notes,
   onSelectConversation,
+  onSelectCommunity,
   onOpenNewChat,
   onOpenNewCommunity,
   onOpenNewNote,
@@ -233,23 +235,29 @@ export const HomeFeed: React.FC<HomeFeedProps> = ({
               {communities.slice(0, 4).map((comm) => (
                 <div
                   key={comm.id}
-                  onClick={() => onTabChange('discover')}
-                  className="flex items-center justify-between p-3 rounded-2xl hover:bg-[#f8f7f3] transition cursor-pointer border border-neutral-100"
+                  onClick={() => {
+                    if (onSelectCommunity) {
+                      onSelectCommunity(comm.id);
+                    } else {
+                      onTabChange('discover');
+                    }
+                  }}
+                  className="flex items-center justify-between p-3 rounded-2xl hover:bg-[#f8f7f3] transition cursor-pointer border border-neutral-100 group"
                 >
                   <div className="flex items-center gap-3 min-w-0">
                     <div
                       className={`w-10 h-10 rounded-2xl ${
                         comm.tone || getRandomTone(comm.id)
-                      } flex items-center justify-center font-black text-xs shrink-0`}
+                      } flex items-center justify-center font-black text-xs shrink-0 group-hover:scale-105 transition`}
                     >
                       {comm.letters || getInitials(comm.title)}
                     </div>
                     <div className="min-w-0">
-                      <span className="text-xs font-bold text-[#18181b] block truncate">
+                      <span className="text-xs font-bold text-[#18181b] block truncate group-hover:text-[#6d5dfc] transition">
                         {comm.title}
                       </span>
                       <span className="text-[11px] text-neutral-400 truncate block">
-                        {comm.description || 'مجتمع تواصل مفتوح'}
+                        {comm.lastMessage ? `💬 ${comm.lastMessage}` : (comm.description || 'مجتمع تواصل مفتوح')}
                       </span>
                     </div>
                   </div>

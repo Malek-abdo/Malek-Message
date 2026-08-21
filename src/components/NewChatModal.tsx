@@ -57,10 +57,20 @@ export const NewChatModal: React.FC<NewChatModalProps> = ({
 
     try {
       setLoading(true);
-      const targetUser: UserProfile = {
+      // Check if user already exists in Firestore
+      const foundUsers = await searchUsers(handle, currentUser.uid);
+      const exactUser = foundUsers.find(
+        (u) => u.username.toLowerCase() === handle || u.displayName.toLowerCase() === handle
+      );
+
+      const targetUser: UserProfile = exactUser || {
         uid: `user_${handle}`,
         displayName: handle,
         username: handle,
+        photoURL: '',
+        phoneNumber: '',
+        countryCode: '+20',
+        countryName: '',
         bio: 'مستخدم في Malek Message',
         createdAt: new Date().toISOString(),
       };
@@ -68,7 +78,7 @@ export const NewChatModal: React.FC<NewChatModalProps> = ({
       const convId = await getOrCreateConversation(currentUser, targetUser);
       onSelectConversation(convId);
       onClose();
-      showToast(`بدأت محادثة مع @${handle}`);
+      showToast(`بدأت محادثة مع @${targetUser.username || handle}`);
     } catch (err) {
       console.error('Error starting chat by username:', err);
       showToast('حدث خطأ أثناء بدء المحادثة.');

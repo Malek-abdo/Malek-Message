@@ -40,6 +40,13 @@ service cloud.firestore {
       allow create: if isAuthenticated();
       allow update: if isAuthenticated();
       allow delete: if isAuthenticated() && resource.data.createdBy == request.auth.uid;
+
+      // Messages subcollection inside community chat
+      match /messages/{messageId} {
+        allow read: if isAuthenticated();
+        allow create: if isAuthenticated() && request.resource.data.senderId == request.auth.uid;
+        allow update, delete: if isAuthenticated();
+      }
     }
 
     // Calls collection

@@ -32,7 +32,7 @@ interface ChatViewProps {
   currentUser: UserProfile;
   messages: ChatMessage[];
   onBack: () => void;
-  onStartCall: (targetName: string, callType?: 'video' | 'audio') => void;
+  onStartCall: (targetName: string, callType?: 'video' | 'audio', targetUser?: { uid: string; displayName?: string; photoURL?: string }) => void;
   showToast: (msg: string) => void;
   onOpenImage: (url: string) => void;
 }
@@ -349,14 +349,14 @@ export const ChatView: React.FC<ChatViewProps> = ({
         {/* Header Actions */}
         <div className="flex items-center gap-1 sm:gap-1.5 md:gap-2 shrink-0 mr-1">
           <button
-            onClick={() => onStartCall(otherData.displayName, 'audio')}
+            onClick={() => onStartCall(otherData.displayName, 'audio', { uid: otherUid, displayName: otherData.displayName, photoURL: otherData.photoURL })}
             className="w-8 h-8 sm:w-9 sm:h-9 md:w-10 md:h-10 rounded-xl md:rounded-2xl bg-[#f4f3ef] hover:bg-[#e9e5ff] text-neutral-700 hover:text-[#6d5dfc] flex items-center justify-center transition cursor-pointer shrink-0"
             title="مكالمة صوتية مباشرة داخل التطبيق"
           >
             <Phone className="w-3.5 h-3.5 md:w-4 md:h-4" />
           </button>
           <button
-            onClick={() => onStartCall(otherData.displayName, 'video')}
+            onClick={() => onStartCall(otherData.displayName, 'video', { uid: otherUid, displayName: otherData.displayName, photoURL: otherData.photoURL })}
             className="w-8 h-8 sm:w-9 sm:h-9 md:w-10 md:h-10 rounded-xl md:rounded-2xl bg-[#111827] text-white hover:bg-[#302c52] flex items-center justify-center transition cursor-pointer shadow-xs shrink-0"
             title="مكالمة فيديو مباشرة داخل التطبيق"
           >

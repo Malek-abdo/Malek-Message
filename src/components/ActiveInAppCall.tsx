@@ -10,7 +10,6 @@ import {
   Volume2,
   VolumeX,
   Share2,
-  MessageSquare,
   Sparkles,
   ShieldCheck,
   Users,
@@ -22,7 +21,7 @@ import {
   Laptop,
 } from 'lucide-react';
 import { UserProfile, CallRecord } from '../types';
-import { getInitials, getRandomTone } from '../lib/firestoreService';
+import { getInitials, getRandomTone, updateCallStatus } from '../lib/firestoreService';
 
 interface ActiveInAppCallProps {
   callRecord: CallRecord;
@@ -47,20 +46,34 @@ export const ActiveInAppCall: React.FC<ActiveInAppCallProps> = ({
   const [isFullScreen, setIsFullScreen] = useState(false);
   const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user');
 
-  // Connection & Duration State
-  const [callStatus, setCallStatus] = useState<'connecting' | 'ringing' | 'connected'>('connecting');
+  // Connection & Duration State (Derived from callRecord status if 1-to-1)
+  const isDirectCall = !!callRecord.targetId;
+  const isTarget = callRecord.targetId === currentUser.uid;
+  const initialStatus = callRecord.status === 'accepted' ? 'connected' : 'ringing';
+  const [callStatus, setCallStatus] = useState<'connecting' | 'ringing' | 'connected'>(initialStatus);
   const [callDuration, setCallDuration] = useState(0);
   const [activeReactions, setActiveReactions] = useState<{ id: string; emoji: string }[]>([]);
   const [copiedLink, setCopiedLink] = useState(false);
-  const [showChatDrawer, setShowChatDrawer] = useState(false);
-  const [inCallMessages, setInCallMessages] = useState<{ id: string; sender: string; text: string; time: string }[]>([]);
-  const [inCallDraft, setInCallDraft] = useState('');
 
   // Media Refs
   const localVideoRef = useRef<HTMLVideoElement | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
   const screenStreamRef = useRef<MediaStream | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
+
+  // Sync call status when callRecord updates in Firestore
+  useEffect(() => {
+    if (!isOpen) return;
+    if (callRecord.status === 'accepted') {
+      setCallStatus('connected');
+    } else if (callRecord.status === 'declined') {
+      showToast('تم رفض المكالمة من الطرف الآخر.');
+      handleEndCallInternal();
+    } else if (callRecord.status === 'ended') {
+      showToast('تم إنهاء المكالمة.');
+      handleEndCallInternal();
+    }
+  }, [callRecord.status, isOpen]);
 
   // Initialize Media Streams when Call Opens
   useEffect(() => {
@@ -252,20 +265,6 @@ export const ActiveInAppCall: React.FC<ActiveInAppCallProps> = ({
     }, 2000);
   };
 
-  // Send In-Call Quick Chat
-  const handleSendInCallMessage = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!inCallDraft.trim()) return;
-    const newMsg = {
-      id: Math.random().toString(),
-      sender: currentUser.displayName,
-      text: inCallDraft.trim(),
-      time: new Date().toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' }),
-    };
-    setInCallMessages((prev) => [...prev, newMsg]);
-    setInCallDraft('');
-  };
-
   // Copy Call Link
   const handleCopyLink = () => {
     navigator.clipboard.writeText(callRecord.link);
@@ -283,6 +282,9 @@ export const ActiveInAppCall: React.FC<ActiveInAppCallProps> = ({
 
   const handleEndCallInternal = () => {
     stopAllMedia();
+    if (callRecord.id && callRecord.status !== 'ended') {
+      updateCallStatus(callRecord.id, 'ended');
+    }
     onEndCall();
   };
 
@@ -344,17 +346,6 @@ export const ActiveInAppCall: React.FC<ActiveInAppCallProps> = ({
           >
             {copiedLink ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
             <span className="hidden md:inline">{copiedLink ? 'تم النسخ' : 'دعوة آخرين'}</span>
-          </button>
-
-          {/* Quick In-Call Chat Drawer Toggle */}
-          <button
-            onClick={() => setShowChatDrawer(!showChatDrawer)}
-            className={`w-9 h-9 rounded-xl flex items-center justify-center transition cursor-pointer backdrop-blur-md border ${
-              showChatDrawer ? 'bg-[#6d5dfc] text-white border-[#6d5dfc]' : 'bg-white/10 hover:bg-white/20 text-white border-white/10'
-            }`}
-            title="الدردشة أثناء المكالمة"
-          >
-            <MessageSquare className="w-4 h-4" />
           </button>
         </div>
       </div>
@@ -464,55 +455,6 @@ export const ActiveInAppCall: React.FC<ActiveInAppCallProps> = ({
                   <span className="text-[9px] text-emerald-400 block font-mono">أنت</span>
                 </div>
               </div>
-            </div>
-          )}
-
-          {/* In-Call Quick Chat Drawer (Slide in) */}
-          {showChatDrawer && (
-            <div className="absolute top-0 bottom-0 left-0 w-72 sm:w-80 bg-neutral-950/95 backdrop-blur-md border-r border-white/10 z-30 flex flex-col p-4 animate-in slide-in-from-left duration-200">
-              <div className="flex items-center justify-between pb-3 border-b border-white/10 mb-3">
-                <div className="flex items-center gap-2">
-                  <MessageSquare className="w-4 h-4 text-emerald-400" />
-                  <span className="text-xs font-bold text-white">الدردشة أثناء المكالمة</span>
-                </div>
-                <button
-                  onClick={() => setShowChatDrawer(false)}
-                  className="text-xs text-neutral-400 hover:text-white"
-                >
-                  إغلاق
-                </button>
-              </div>
-
-              <div className="flex-1 overflow-y-auto space-y-2 text-xs">
-                {inCallMessages.length === 0 ? (
-                  <p className="text-neutral-500 text-center py-8">لا توجد رسائل بعد</p>
-                ) : (
-                  inCallMessages.map((m) => (
-                    <div key={m.id} className="p-2 rounded-xl bg-white/5 border border-white/5">
-                      <div className="flex justify-between text-[10px] text-neutral-400 mb-0.5">
-                        <span className="font-bold text-[#b8f3df]">{m.sender}</span>
-                        <span>{m.time}</span>
-                      </div>
-                      <p className="text-neutral-200 text-right">{m.text}</p>
-                    </div>
-                  ))
-                )}
-              </div>
-
-              <form onSubmit={handleSendInCallMessage} className="mt-3 flex gap-1.5">
-                <input
-                  value={inCallDraft}
-                  onChange={(e) => setInCallDraft(e.target.value)}
-                  placeholder="اكتب رسالة سريعة..."
-                  className="flex-1 h-9 rounded-xl bg-white/10 px-3 text-xs outline-none border border-white/10 text-right"
-                />
-                <button
-                  type="submit"
-                  className="h-9 px-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold"
-                >
-                  إرسال
-                </button>
-              </form>
             </div>
           )}
         </div>
